@@ -83,6 +83,7 @@ import (
 	bxsession "github.com/IBM-Cloud/bluemix-go/session"
 	ibmpisession "github.com/IBM-Cloud/power-go-client/ibmpisession"
 	"github.com/IBM-Cloud/terraform-provider-ibm/version"
+	"github.com/IBM/platform-services-go-sdk/catalogmanagementv1"
 )
 
 // RetryAPIDelay - retry api delay
@@ -233,6 +234,7 @@ type ClientSession interface {
 	CisRangeAppClientSession() (*cisrangeappv1.RangeApplicationsV1, error)
 	CisWAFRuleClientSession() (*ciswafrulev1.WafRulesApiV1, error)
 	IAMIdentityV1API() (*iamidentity.IamIdentityV1, error)
+	CatalogManagementV1() (*catalogmanagementv1.CatalogManagementV1, error)
 }
 
 type clientSession struct {
@@ -444,6 +446,13 @@ type clientSession struct {
 	//IAM Identity Option
 	iamIdentityErr error
 	iamIdentityAPI *iamidentity.IamIdentityV1
+
+	catalogManagementClient    *catalogmanagementv1.CatalogManagementV1
+	catalogManagementClientErr error
+}
+
+func (session clientSession) CatalogManagementV1() (*catalogmanagementv1.CatalogManagementV1, error) {
+	return session.catalogManagementClient, session.catalogManagementClientErr
 }
 
 // BluemixAcccountAPI ...
@@ -1030,6 +1039,7 @@ func (c *Config) ClientSession() (interface{}, error) {
 	session.kmsAPI = kmsAPIclient
 
 	var authenticator core.Authenticator
+
 	if c.BluemixAPIKey != "" {
 		authenticator = &core.IamAuthenticator{
 			ApiKey: c.BluemixAPIKey,
@@ -1043,6 +1053,25 @@ func (c *Config) ClientSession() (interface{}, error) {
 		authenticator = &core.BearerTokenAuthenticator{
 			BearerToken: sess.BluemixSession.Config.IAMAccessToken,
 		}
+	}
+
+	// Construct an "options" struct for creating the service client.
+	catalogManagementClientOptions := &catalogmanagementv1.CatalogManagementV1Options{
+		URL:           "https://dev-cm.globalcatalog.test.cloud.ibm.com/api/v1-beta",
+		Authenticator: authenticator,
+	}
+
+	// Construct the service client.
+	session.catalogManagementClient, err = catalogmanagementv1.NewCatalogManagementV1(catalogManagementClientOptions)
+	if err == nil {
+		// Enable retries for API calls
+		session.catalogManagementClient.Service.EnableRetries(c.RetryCount, c.RetryDelay)
+		// Add custom header for analytics
+		session.catalogManagementClient.SetDefaultHeaders(gohttp.Header{
+			"X-Original-User-Agent": {fmt.Sprintf("terraform-provider-ibm/%s", version.Version)},
+		})
+	} else {
+		session.catalogManagementClientErr = fmt.Errorf("Error occurred while configuring Catalog Management API service: %q", err)
 	}
 
 	vpcclassicurl := fmt.Sprintf("https://%s.iaas.cloud.ibm.com/v1", c.Region)
